@@ -1,0 +1,324 @@
+<project name="editSolutions" default="manageScripts">
+	<!--
+# $Author: pradeep9873 $
+# $Header: http://172.17.98.25/svn/PAS/trunk/majesco-policy/LifeCycleSupport/Build/manageDBScripts.xml 26088 2016-05-02 09:57:30Z pradeep9873 $
+# $URL: http://172.17.98.25/svn/PAS/trunk/majesco-policy/LifeCycleSupport/Build/manageDBScripts.xml $
+# $Revision: 26088 $
+# $LastChangedDate: 2016-05-02 15:27:30 +0530 (Mon, 02 May 2016) $
+# $Id: manageDBScripts.xml 26088 2016-05-02 09:57:30Z pradeep9873 $
+-->
+	<description>
+		Manages the database scripts. It determines which scripts should be given to the client based on 
+	    the delivered version and consolidate the SQLs required to execute on databases to bring the existing databases to latest version 	being deployed.The scripts are then zipped for distribution package.
+	    
+		NOTE: THIS ANT FILE IS CALLED FROM build.xml's manageDBScripts TARGET, IT IS NOT MEANT TO BE EXECUTED ON ITS OWN
+	
+	    To determine which versions should be packaged, it must look at the Release Version, the currentDatabaseVersion, and
+	    the available script versions /Releases in SVN.  For each database, it only picks files from the directory that matches
+	    Release Version.  
+	   
+	    </description>
+
+	<!-- ***************************************** PROPERTIES *************************************************** -->
+
+	<!-- Set the static properties (for dynamic props, check init target) -->
+	<property name="project.home" value="${basedir}" />
+	<!-- where you are running this build file from -->
+	<!-- database incremental file names -->
+	<property name="EDITSOLUTIONSIncrementalScript" value="${dist.dir}/EDITSOLUTIONSIncrementalScript.sql" />
+
+	<property name="EDITSOLUTIONS_POSTPROCESSING_IncrementalScript" value="${dist.dir}/EDITSOLUTIONS_POSTPROCESSING_IncrementalScript.sql" />
+
+	<property name="ENGINEIncrementalScript" value="${dist.dir}/ENGINEIncrementalScript.sql" />
+
+	<property name="ENGINE_POSTPROCESSING_IncrementalScript" value="${dist.dir}/ENGINE_POSTPROCESSING_IncrementalScript.sql" />
+
+	<property name="SECURITYIncrementalScript" value="${dist.dir}/SECURITYIncrementalScript.sql" />
+
+	<property name="SECURITY_POSTPROCESSING_IncrementalScript" value="${dist.dir}/SECURITY_POSTPROCESSING_IncrementalScript.sql" />
+
+	<property name="CMIFIncrementalScript" value="${dist.dir}/CMIFIncrementalScript.sql" />
+
+	<property name="CMIF_POSTPROCESSING_IncrementalScript" value="${dist.dir}/CMIF_POSTPROCESSING_IncrementalScript.sql" />
+
+	<property name="CMIFContentScript" value="${dist.dir}/CMIFContentScript.sql" />
+
+
+
+	<!-- ***************************************** MAIN TARGETS *************************************************** -->
+
+	<!-- Removes the contents of the output directories -->
+	<target name="cleanDatabaseOutputDirectories" depends="init" description="Removes the contents of the output directories">
+		<delete includeEmptyDirs="true" failonerror="false">
+			<fileset dir="${databases.dir}" includes="**/*" />
+		</delete>
+
+		<!-- recreate the top directory since above delete deleted the contents and the directories themselves -->
+		<mkdir dir="${databases.dir}" />
+		<!-- contains only those files that will be sent to customer -->
+		<delete file="${EDITSOLUTIONSIncrementalScript}" />
+		<delete file="${EDITSOLUTIONS_POSTPROCESSING_IncrementalScript}" />
+		<delete file="${ENGINEIncrementalScript}" />
+		<delete file="${ENGINE_POSTPROCESSING_IncrementalScript}" />
+		<delete file="${SECURITYIncrementalScript}" />
+		<delete file="${SECURITY_POSTPROCESSING_IncrementalScript}" />
+		<delete file="${CMIFIncrementalScript}" />
+		<delete file="${CMIF_POSTPROCESSING_IncrementalScript}" />
+		<delete file="${CMIFContentScript}" />
+		<delete file="${applicationName}DatabaseIncremetalScripts_V${majorVersion}.${svnRevNumber}.zip" />
+		<delete file="${dist.dir}/${applicationName}DatabaseScripts_V${majorVersion}.${svnRevNumber}.zip" />
+	</target>
+
+
+	<!-- Default target - gets the scripts from subversion and zips the necessary scripts for this client -->
+	<!-- <target name="manageScripts" depends="init, cleanDatabaseOutputDirectories,CheckoutScripts, processDatabaseScripts, zipDatabaseScripts, zipDatabaseIncremetalScripts" description="Gets the scripts from subversion and zips the necessary scripts for this client" >
+		</target> -->
+	<target name="manageScripts" depends="init, cleanDatabaseOutputDirectories,CheckoutScripts, processDatabaseScripts" description="Gets the scripts from subversion and zips the necessary scripts for this client">
+	</target>
+
+
+
+
+	<!-- ************************************* INTERNAL TARGETS ************************************************* -->
+
+	<!-- Initializes properties, etc. -->
+	<target name="init">
+		<!-- Set the dynamic properties -->
+		<property name="svn.databases.dir" value="${buildRoot.dir}/SQL/PAS" />
+
+		<property name="databases.fetch.dir" value="${buildRoot.dir}/SQL/PAS" />
+		<!-- contains all of the fetched files -->
+		<property name="databases.dir" value="${build.dir}/Database" />
+
+	</target>
+
+
+	<!--  Get the scripts from source control -->
+	<target name="CheckoutScripts" depends="init" description="Gets all the scripts from source control">
+		<if>
+			<equals arg1="${forceFetch}" arg2="true" />
+
+			<then>
+				<echo message="Forcing SVN to refresh all files" />
+				<!-- <copy todir="${databases.fetch.dir}/"  overwrite="true"  encoding="UTF-16" outputencoding="UTF-16" >
+	                    <fileset dir="${svn.databases.dir}/" />
+	                </copy>-->
+
+			</then>
+			<else>
+				<echo message="Incremental fetch" />
+
+				<!--<copy todir="${databases.fetch.dir}/"  overwrite="true"  encoding="UTF-16" outputencoding="UTF-16" >
+	                    <fileset dir="${svn.databases.dir}/" />
+	                </copy>-->
+
+			</else>
+		</if>
+	</target>
+
+	<!-- Processes the database script files one at a time -->
+	<!-- For each database, the version information is added to the versionInfo file for customer view -->
+	<!-- For each database, determine if the script should be packaged for the client based on the version and -->
+
+	<!-- information -->
+	<target name="processDatabaseScripts" depends="init, CheckoutScripts" description="Performs all necessary database script processing">
+		<propertyselector property="dbName.list" delimiter="," match="currentDatabaseVersion\.([^\.]*)" select="\1" distinct="true" casesensitive="false" />
+
+		<foreach list="${dbName.list}" delimiter="," target="appendVersionInfoFileWithDatabaseInfo" inheritall="true" param="dbName" />
+
+		<foreach list="${dbName.list}" delimiter="," target="processScript" inheritall="true" param="dbName" />
+
+	</target>
+
+
+	<!-- Gets the version for each database script and calls packageDBScript to determine if it should be packaged -->
+	<!-- for the client (the version is in the directory name) -->
+	<target name="processScript" description="Determines which scripts should be packaged for the client and copies them to databases.dir">
+		<propertycopy name="dbVersion" from="currentDatabaseVersion.${dbName}" />
+
+		<condition property="IS_UNIX">
+			<os family="unix" />
+		</condition>
+		<if>
+			<equals arg1="${IS_UNIX}" arg2="true" />
+			<then>
+				<fixcrlf srcdir="${databases.fetch.dir}" includes="Version.txt" eol="lf" eof="remove" />
+			</then>
+		</if>
+		<loadfile property="file" srcfile="${databases.fetch.dir}/Version.txt" />
+		<foreach target="packageDBScript" param="dir.name" inheritall="true" list="${file}" delimiter="${line.separator}">
+		</foreach>
+	</target>
+
+
+	<!-- Determine if the script should be packaged for the client.  Does this by comparing the user specified -->
+	<!-- version to the version of the script (this is done in a Perl script).  If the file should be packaged, -->
+
+	<target name="packageDBScript">
+		<basename property="versiondir.name" file="${dir.name}" />
+
+		<propertycopy name="userVersion" from="currentDatabaseVersion.${dbName}" />
+		<property name="scriptVersion" value="${versiondir.name}" />
+
+		<antcallback target="shouldPackageDBScript" return="shouldPackage" />
+
+		<property name="currentUpdateScriptName" value="updateDBVersionFor${dbName}.sql" />
+		<property name="currentUpdateScriptInFetchDir" value="${databases.fetch.dir}/${scriptVersion}/${currentUpdateScriptName}" />
+
+		<if>
+			<equals arg1="${shouldPackage}" arg2="true" />
+
+			<then>
+				<!-- set property that says whether the update script file exists or not -->
+				<available file="${currentUpdateScriptInFetchDir}" property="updateDBVersion.present" />
+
+				<!-- create the update script and add it to subversion if it doesn't already exist -->
+				<!--<antcallback target="handleUpdateDBVersionScript"/>-->
+
+				<!-- copy the needed files to databases.dir -->
+				<copy todir="${databases.dir}/${scriptVersion}/">
+					<fileset dir="${databases.fetch.dir}/${scriptVersion}/" />
+				</copy>
+				<exec executable="${perlHome}/perl" spawn="false" failonerror="false" dir="${buildRoot.dir}/LifeCycleSupport/Build/">
+					<arg value="FileConvert.PL" />
+					<arg value="${databases.dir}/${scriptVersion}/SCRIPTS/${dbName}_DDL.sql" />
+					<arg value="${databases.dir}/${scriptVersion}/SCRIPTS/${dbName}_DML.sql" />
+					<arg value="${databases.dir}/${scriptVersion}/POSTPROCESSING/${dbName}_DDL.sql" />
+					<arg value="${databases.dir}/${scriptVersion}/POSTPROCESSING/${dbName}_DML.sql" />
+				</exec>
+				<!-- create the consolidated sql scripts fro release delivery-->
+				<concat destfile="${dist.dir}/${dbName}IncrementalScript.sql" append="true" encoding="UTF-8" outputencoding="UTF-8">
+					<header filtering="no" trimleading="yes">
+					/*
+					* Copyright (C) 2016. All Rights Reserved.
+					* Majesco
+					*/
+					-- Incremental Script from Release Version ${scriptVersion} for database ${dbName}
+								
+	                </header>
+
+					<filelist dir="${databases.dir}/${scriptVersion}/SCRIPTS" files="${dbName}_DDL.sql" />
+
+					<filelist dir="${databases.dir}/${scriptVersion}/SCRIPTS" files="${dbName}_DML.sql" />
+
+					<filterchain>
+						<deletecharacters chars="&#xFEFF;" />
+					</filterchain>
+
+				</concat>
+				<concat destfile="${dist.dir}/${dbName}_POSTPROCESSING_IncrementalScript.sql" append="true" encoding="UTF-8" outputencoding="UTF-8">
+					<header filtering="no" trimleading="yes">
+					/*
+					* Copyright (C) 2016. All Rights Reserved.
+					* Majesco
+					*/
+					-- Incremental Script from Release Version ${scriptVersion} for database ${dbName}
+								
+	                </header>
+
+					<filelist dir="${databases.dir}/${scriptVersion}/POSTPROCESSING" files="${dbName}_DDL.sql" />
+
+					<filelist dir="${databases.dir}/${scriptVersion}/POSTPROCESSING" files="${dbName}_DML.sql" />
+
+					<filterchain>
+						<deletecharacters chars="&#xFEFF;" />
+					</filterchain>
+
+				</concat>
+
+			</then>
+		</if>
+	</target>
+
+
+	<!-- Generate the update script for db version and add it subversion -->
+	<target name="handleUpdateDBVersionScript" unless="updateDBVersion.present" description="Generates the db version update script and adds it to subversion">
+		<!-- create the update script if it doesn't already exist -->
+		<antcallback target="createUpdateDBVersionScript" />
+
+		<!-- add the script to subversion -->
+		<p4change description="Add database version update script generated by build" />
+
+		<echo message="Adding ${currentUpdateScriptName} to subversion" />
+
+		<p4add changelist="${p4.change}">
+			<fileset file="${currentUpdateScriptInFetchDir}" />
+		</p4add>
+
+		<p4submit change="${p4.change}" />
+	</target>
+
+
+	<!-- Create Oracle SQL script to update database version information (if it doesn't already exist) -->
+	<target name="createOracleUpdateDBVersionScript" unless="updateDBVersion.present" description="Creates SQL scripts to modify the database version information for Oracle">
+		<propertycopy name="dbVersion" from="currentDatabaseVersion.${dbName}" />
+
+		<echo file="${currentUpdateScriptInFetchDir}" append="false">
+	/* Updates the database version data */
+	-- connect ${dbName}/segllc@orcl;
+	
+	UPDATE "DatabaseVersion" SET "MajorVersion" = ${majorVersion};
+	UPDATE "DatabaseVersion" SET "MinorVersion" = ${dbVersion};
+	UPDATE "DatabaseVersion" SET "UpdateDateTime" = sysdate;
+	        </echo>
+	</target>
+
+
+
+	<!-- Create SQLServer SQL script to update database version information (if it doesn't already exist) -->
+	<target name="createSQLServerUpdateDBVersionScript" unless="updateDBVersion.present" description="Creates SQL scripts to modify the database version information for SQLServer">
+		<propertycopy name="dbVersion" from="currentDatabaseVersion.${dbName}" />
+
+		<echo file="${currentUpdateScriptInFetchDir}" append="false">
+	/* Updates the database version data */
+	-- USE ${dbName}
+	
+	UPDATE "DatabaseVersion" SET "MajorVersion" = ${majorVersion}
+	UPDATE "DatabaseVersion" SET "MinorVersion" = ${dbVersion}
+	UPDATE "DatabaseVersion" SET "UpdateDateTime" = CURRENT_TIMESTAMP
+	
+	GO
+	        </echo>
+	</target>
+
+
+	<!-- Appends the version info file with database version information -->
+	<target name="appendVersionInfoFileWithDatabaseInfo">
+		<propertycopy name="dbVersion" from="currentDatabaseVersion.${dbName}" />
+		<echo file="${dist.dir}\${versionInfo.file}" append="true">Database Version for ${dbName} = ${majorVersion} ${dbVersion}
+	        </echo>
+	</target>
+
+	<!-- Create zip file of database scripts -->
+	<target name="zipDatabaseScripts" depends="init, CheckoutScripts, processDatabaseScripts" description="Creates a zip file of the database scripts">
+		<zip destfile="${dist.dir}/${applicationName}DatabaseScripts_V${majorVersion}.${svnRevNumber}.zip" basedir="${databases.dir}" />
+	</target>
+
+	<target name="zipDatabaseIncremetalScripts" depends="init, CheckoutScripts, processDatabaseScripts" description="Creates a zip file of the database scripts">
+		<zip destfile="${dist.dir}/${applicationName}DatabaseIncremetalScripts_V${majorVersion}.${svnRevNumber}.zip" basedir="${dist.dir}" includes="**/*.sql" />
+	</target>
+
+
+
+	<!-- Determines if the db script should be packaged for the client or not (true if should) -->
+	<target name="shouldPackageDBScript">
+		<exec executable="${perlHome}/perl" output="shouldPackageDBScript.txt">
+			<arg line="shouldPackageDBScript.pl ${userVersion} ${scriptVersion}" />
+		</exec>
+
+		<loadfile property="shouldPackage" srcFile="shouldPackageDBScript.txt">
+			<filterchain>
+				<headfilter lines="1" skip="0" />
+
+				<tokenfilter>
+					<replaceregex pattern=",[\w\W]*" replace="" flags="g" />
+					<trim />
+				</tokenfilter>
+				<striplinebreaks />
+				<trim />
+			</filterchain>
+		</loadfile>
+		<echo message="script version ${scriptVersion} user version ${userVersion} at ${now}" />
+	</target>
+
+</project>
